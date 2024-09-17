@@ -102,28 +102,6 @@ func saveDocument(document TextDocument) (TextDocument,error) {
 
 	return document,err
 }
-func getDocument(documentName string) (TextDocument,error) {
-
-	var (
-		Name         string
-		text         string
-		OwnerId      int
-	)
-
-	err := config.Db.QueryRow(`SELECT Name,text,OwnerId 
-	FROM Petition where Name = ? ORDER BY PetitionId DESC LIMIT 1`, documentName).Scan(&Name, &text, &OwnerId)
-	docMutex.Lock()
-	doc := TextDocument{
-		Title:        Name,
-		Text:         text,
-		OwnerId:      OwnerId,
-	}
-
-	docMutex.Unlock()
-
-	return doc,err
-
-}
 
 func handleConnections(hub *Hub, c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -149,6 +127,43 @@ func handleConnections(hub *Hub, c *gin.Context) {
 	client.Send <- &doc
 }
 
+func getDocument(documentName string) (TextDocument,error) {
+
+	var (
+		Name         string
+		text         string
+		OwnerId      int
+	)
+
+	err := config.Db.QueryRow(`SELECT Name,text,OwnerId 
+	FROM Petition where Name = ? ORDER BY PetitionId DESC LIMIT 1`, documentName).Scan(&Name, &text, &OwnerId)
+	docMutex.Lock()
+	doc := TextDocument{
+		Title:        Name,
+		Text:         text,
+		OwnerId:      OwnerId,
+	}
+
+	docMutex.Unlock()
+
+	return doc,err
+
+}
+
+
+func (c *Client) write() {
+	defer c.conn.Close()
+	for{
+		select {
+		case doc, ok := <-c.Send:
+			if !ok {
+				return
+			}
+			c.Document.Text = doc.Text
+			c.conn.WriteMessage(websocket.TextMessage, []byte(doc.Text))
+		}
+	}
+}
 func (c *Client) read() {
 	defer func() {
 
@@ -170,19 +185,7 @@ func (c *Client) read() {
 	}
 }
 
-func (c *Client) write() {
-	defer c.conn.Close()
-	for{
-		select {
-		case doc, ok := <-c.Send:
-			if !ok {
-				return
-			}
-			c.Document.Text = doc.Text
-			c.conn.WriteMessage(websocket.TextMessage, []byte(doc.Text))
-		}
-	}
-}
+
 func getAll()( []TextDocument,error) {
 
 	query := `SELECT Name, Text, OwnerId
@@ -223,6 +226,23 @@ func getAllPetitions(c *gin.Context) {
 	}
 }
 
+func signPetition(c *gin.Context) {
+	var signPetition SignPetition
+	if err := c.BindJSON(&signPetition); err != nil {
+		return
+	}
+
+	query := "INSERT INTO SignPetition(PetitionName,UserId) VALUES (?, ?)"
+	_, err := config.Db.Exec(query, signPetition.PetitionName, signPetition.UserId)
+
+	if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign petition"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{"message": "Petition signed successfully", "signPetition": signPetition})
+}
+
 func createPetition(c *gin.Context) {
 	var document TextDocument
 	if err := c.BindJSON(&document); err != nil {
@@ -244,28 +264,14 @@ func createPetition(c *gin.Context) {
 
 }
 
-func signPetition(c *gin.Context) {
-	var signPetition SignPetition
-	if err := c.BindJSON(&signPetition); err != nil {
-		return
-	}
 
-	query := "INSERT INTO SignPetition(PetitionName,UserId) VALUES (?, ?)"
-	_, err := config.Db.Exec(query, signPetition.PetitionName, signPetition.UserId)
-
-	if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sign petition"})
-        return
-    }
-
-    c.JSON(http.StatusOK, gin.H{"message": "Petition signed successfully", "signPetition": signPetition})
-}
 
 func getSignatories(c *gin.Context) {
 	petitionName := c.Query("PetitionName")
 	query := `SELECT first_name, last_name, email FROM Users JOIN SignPetition ON Users.id = SignPetition.UserId WHERE SignPetition.PetitionName = ` + petitionName + " "
 	rows, err := config.Db.Query(query)
 	if (err != nil){
+		fmt.Println(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve signatories"})
 		return 
 	}

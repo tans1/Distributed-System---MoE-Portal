@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	mysqlDSN = "root:12345678@tcp(127.0.0.1:4040)/resultsDb?charset=utf8mb4&parseTime=True&loc=Local"
+	mysqlDSN = "root:Emebet@1994@tcp(127.0.0.1:3306)/results?charset=utf8mb4&parseTime=True&loc=Local"
 	serverAddress = "localhost:8080"
 )
 
